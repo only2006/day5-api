@@ -1,3 +1,6 @@
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
 import json
 import logging
 
@@ -97,3 +100,11 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             "X-Accel-Buffering": "no",   # 关掉 Nginx 缓冲，否则不流式
         },
     )
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+@app.get("/")
+async def index() -> FileResponse:
+    """根路径直接返回前端页面。"""
+    return FileResponse("static/index.html")

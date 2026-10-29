@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI 助手</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; height: 100dvh; display: flex; flex-direction: column;
+      font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+      background: #f5f6f8; color: #1a1a1a;
+    }
+    header {
+      padding: 14px 18px; background: #fff; border-bottom: 1px solid #e6e8eb;
+      font-weight: 600; display: flex; justify-content: space-between; align-items: center;
+    }
+    header small { font-weight: 400; color: #8a9099; }
+    #messages {
+      flex: 1; overflow-y: auto; padding: 16px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .bubble {
+      max-width: 82%; padding: 10px 14px; border-radius: 14px;
+      line-height: 1.65; white-space: pre-wrap; word-break: break-word; font-size: 15px;
+    }
+    .bubble.user { align-self: flex-end; background: #2f7cf6; color: #fff; border-bottom-right-radius: 4px; }
+    .bubble.assistant { align-self: flex-start; background: #fff; border: 1px solid #e6e8eb; border-bottom-left-radius: 4px; }
+    .bubble.error { background: #fff1f0; border-color: #ffccc7; color: #c0392b; }
+    .bubble.assistant:empty::after { content: "…"; color: #9aa0a6; }
+    form {
+      display: flex; gap: 8px; padding: 12px; background: #fff; border-top: 1px solid #e6e8eb;
+    }
+    textarea {
+      flex: 1; resize: none; padding: 10px 12px; font: inherit; font-size: 15px;
+      border: 1px solid #d8dce1; border-radius: 10px; outline: none; max-height: 120px;
+    }
+    textarea:focus { border-color: #2f7cf6; }
+    button {
+      padding: 0 18px; border: 0; border-radius: 10px; background: #2f7cf6; color: #fff;
+      font: inherit; font-weight: 600; cursor: pointer;
+    }
+    button:disabled { background: #a9c4f5; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <header>
+    <span>AI 助手</span>
+    <small id="status">就绪</small>
+  </header>
+
+  <main id="messages"></main>
+
+  <form id="form">
+    <textarea id="input" rows="1" placeholder="说点什么…（Enter 发送，Shift+Enter 换行）"></textarea>
+    <button id="send" type="submit">发送</button>
+  </form>
+
+  <script>
+    // 同源部署留空；前后端分开部署时填后端地址，例如 "https://xxx.up.railway.app"
+    const API_BASE = "";
+
+    const messagesEl = document.getElementById("messages");
+    const form = document.getElementById("form");
+    const inputEl = document.getElementById("input");
+    const sendBtn = document.getElementById("send");
+    const statusEl = document.getElementById("status");
+
+    const history = [
+      { role: "system", content: "你是一个简洁、耐心的技术助手，回答控制在 200 字以内。" }
+    ];
+
+    function addBubble(role, text = "") {
+      const el = document.createElement("div");
+      el.className = `bubble ${role}`;
+      el.textContent = text;          // 用 textContent，绝不用 innerHTML（防 XSS）
+      messagesEl.appendChild(el);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      return el;
+    }
+
+    function scrollToBottom() {
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    async function send(text) {
+      history.push({ role: "user", content: text });
+      addBubble("user", text);
+
+      const bubble = addBubble("assistant", "");
+      let full = "";
+
+      sendBtn.disabled = true;
+      statusEl.textContent = "生成中…";
+
+      try {
+        const resp = await fetch(`${API_BASE}/chat/stream`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: history, max_tokens: 800 }),
+        });
+
+        if (!resp.ok) {
+          let detail = `HTTP ${resp.status}`;
+          try {
+            const err = await resp.json();
+            if (err.detail) detail = JSON.stringify(err.detail);
+          } catch (_) {}
+          throw new Error(detail);
+        }
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          // SSE 以空行分隔消息，最后一段可能不完整，留在 buffer 里
+          const blocks = buffer.split("\n\n");
+          buffer = blocks.pop();
+
+          for (const block of blocks) {
+            const line = block.split("\n").find((l) => l.startsWith("data: "));
+            if (!line) continue;
+
+            const payload = line.slice(6);
+            if (payload === "[DONE]") continue;
+
+            let obj;
+            try { obj = JSON.parse(payload); } catch (_) { continue; }
+
+            if (obj.error) throw new Error(obj.error);
+            if (obj.delta) {
+              full += obj.delta;
+              bubble.textContent = full;
+              scrollToBottom();
+            }
+          }
+        }
+
+        history.push({ role: "assistant", content: full });
+      } catch (e) {
+        bubble.classList.add("error");
+        bubble.textContent = `出错了：${e.message}`;
+      } finally {
+        sendBtn.disabled = false;
+        statusEl.textContent = "就绪";
+        inputEl.focus();
+      }
+    }
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const text = inputEl.value.trim();
+      if (!text || sendBtn.disabled) return;
+      inputEl.value = "";
+      send(text);
+    });
+
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        form.requestSubmit();
+      }
+    });
+
+    inputEl.focus();
+  </script>
+</body>
+</html>

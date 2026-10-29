@@ -1,0 +1,17 @@
+# 安全：绝不能把密钥打进镜像
+.env
+.env.*
+
+# 本地虚拟环境 / 缓存（不需要进镜像，且体积大）
+.venv
+__pycache__
+*.pyc
+*.pyo
+
+# Git 元数据
+.git
+.gitignore
+
+# 依赖锁文件（用 pip 直接装，无需 uv.lock）
+uv.lock
+.pytest_cache
