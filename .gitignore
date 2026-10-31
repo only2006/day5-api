@@ -12,3 +12,5 @@ wheels/
 # 环境变量（含 API key，绝不能提交）
 .env
 .env.*
+# 但允许提交“无密钥的模板”，供他人 clone 后复制成 .env
+!.env.example
